@@ -3,11 +3,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 let scene, camera, renderer, controls;
 let sun, planets = [];
+let planetTrails = []; // New array to store planet trails
 
 const G = 6.67430e-11; // Gravitational constant
 const SCALE = 1e12; // Greatly increased scale factor to slow down the simulation
 const TIME_STEP = 1 / 60; // Time step for update (60 FPS)
 const MAX_FORCE = 1e-4; // Maximum force to prevent extreme accelerations
+const TRAIL_LENGTH = 1000; // Number of points in each trail
 
 function init() {
     scene = new THREE.Scene();
@@ -37,6 +39,14 @@ function init() {
     sun = new THREE.Mesh(sunGeometry, sunMaterial);
     sun.userData.mass = sunRadius * 1e30;
     scene.add(sun);
+
+    // Add a point light at the sun's position
+    const pointLight = new THREE.PointLight(0xffffff, 1.5, 0);
+    sun.add(pointLight);
+
+    // Optionally, add more ambient light for subtle illumination
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+    scene.add(ambientLight);
 
     // Create planets with random positions
     const planetColors = [0x3366ff, 0x66ff33, 0xff6633, 0x9933ff];
@@ -68,16 +78,24 @@ function init() {
         planet.userData.mass = planetRadius * 1e24;
         planets.push(planet);
         scene.add(planet);
+
+        // Create trail for the planet
+        const trailGeometry = new THREE.BufferGeometry();
+        const trailPositions = new Float32Array(TRAIL_LENGTH * 3);
+        trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+        const trailMaterial = new THREE.LineBasicMaterial({ color: planetColors[i], opacity: 0.5, transparent: true });
+        const trail = new THREE.Line(trailGeometry, trailMaterial);
+        scene.add(trail);
+        planetTrails.push(trail);
+
+        // Create and add orbit line
+        createOrbitLine(planet);
     }
 
     // Add directional light
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
     directionalLight.position.set(1, 1, 1).normalize();
     scene.add(directionalLight);
-
-    // Add ambient light
-    const ambientLight = new THREE.AmbientLight(0x404040);
-    scene.add(ambientLight);
 
     animate();
 }
@@ -118,7 +136,7 @@ function createAxesHelperWithTicks(axisLength, tickSpacing) {
 }
 
 function updatePlanetPositions(delta) {
-    planets.forEach(planet => {
+    planets.forEach((planet, index) => {
         const distanceToSun = planet.position.distanceTo(sun.position);
         const forceDirection = sun.position.clone().sub(planet.position).normalize();
         let forceMagnitude = G * sun.userData.mass * planet.userData.mass / (distanceToSun * distanceToSun);
@@ -135,6 +153,22 @@ function updatePlanetPositions(delta) {
         // Update position
         const positionDelta = planet.userData.velocity.clone().multiplyScalar(delta / SCALE);
         planet.position.add(positionDelta);
+
+        // Update trail
+        const trail = planetTrails[index];
+        const positions = trail.geometry.attributes.position.array;
+        
+        // Shift all positions back by one
+        for (let i = positions.length - 1; i > 2; i--) {
+            positions[i] = positions[i - 3];
+        }
+        
+        // Add current position to the front
+        positions[0] = planet.position.x;
+        positions[1] = planet.position.y;
+        positions[2] = planet.position.z;
+        
+        trail.geometry.attributes.position.needsUpdate = true;
     });
 }
 
@@ -154,6 +188,26 @@ function animate() {
 
     controls.update();
     renderer.render(scene, camera);
+}
+
+function createOrbitLine(planet) {
+    const orbitRadius = planet.position.length();
+    const segments = 360;
+    const orbitGeometry = new THREE.BufferGeometry();
+    const orbitPositions = new Float32Array((segments + 1) * 3);
+
+    for (let i = 0; i <= segments; i++) {
+        const theta = (i / segments) * Math.PI * 2;
+        orbitPositions[i * 3] = Math.cos(theta) * orbitRadius;
+        orbitPositions[i * 3 + 1] = 0; // Assuming orbits lie on the XZ plane
+        orbitPositions[i * 3 + 2] = Math.sin(theta) * orbitRadius;
+    }
+
+    orbitGeometry.setAttribute('position', new THREE.BufferAttribute(orbitPositions, 3));
+    const orbitMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.5, transparent: true });
+    const orbitLine = new THREE.LineLoop(orbitGeometry, orbitMaterial);
+
+    scene.add(orbitLine);
 }
 
 init();
